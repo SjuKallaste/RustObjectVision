@@ -32,6 +32,82 @@ struct Region {
     centroid: (f32, f32),
 }
 
+/// Named color filter – picks pixels whose hue falls within [hue_min, hue_max].
+/// Achromatic colors (white, gray, black) use the `is_achromatic` flag instead.
+#[derive(Clone, PartialEq)]
+struct ColorFilter {
+    label:        &'static str,
+    swatch:       egui::Color32,
+    /// hue range in degrees [0, 360). None means "achromatic".
+    hue_range:    Option<(f32, f32)>,
+}
+
+fn color_filters() -> Vec<ColorFilter> {
+    vec![
+        ColorFilter { label: "Red",    swatch: egui::Color32::from_rgb(220,  50,  50), hue_range: Some((330.0, 30.0))  },
+        ColorFilter { label: "Orange", swatch: egui::Color32::from_rgb(230, 130,  30), hue_range: Some(( 15.0, 45.0))  },
+        ColorFilter { label: "Yellow", swatch: egui::Color32::from_rgb(230, 210,  30), hue_range: Some(( 40.0, 75.0))  },
+        ColorFilter { label: "Green",  swatch: egui::Color32::from_rgb( 40, 190,  60), hue_range: Some(( 70.0,165.0))  },
+        ColorFilter { label: "Cyan",   swatch: egui::Color32::from_rgb( 30, 200, 210), hue_range: Some((160.0,200.0))  },
+        ColorFilter { label: "Blue",   swatch: egui::Color32::from_rgb( 50,  90, 220), hue_range: Some((195.0,265.0))  },
+        ColorFilter { label: "Purple", swatch: egui::Color32::from_rgb(140,  50, 210), hue_range: Some((260.0,310.0))  },
+        ColorFilter { label: "Pink",   swatch: egui::Color32::from_rgb(220,  80, 160), hue_range: Some((305.0,340.0))  },
+        ColorFilter { label: "White",  swatch: egui::Color32::from_rgb(240, 240, 240), hue_range: None                 },
+        ColorFilter { label: "Gray",   swatch: egui::Color32::from_rgb(140, 140, 140), hue_range: None                 },
+        ColorFilter { label: "Black",  swatch: egui::Color32::from_rgb( 30,  30,  30), hue_range: None                 },
+    ]
+}
+
+/// Returns hue in [0, 360), saturation in [0,1], value in [0,1].
+fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let rf = r as f32 / 255.0;
+    let gf = g as f32 / 255.0;
+    let bf = b as f32 / 255.0;
+    let cmax = rf.max(gf).max(bf);
+    let cmin = rf.min(gf).min(bf);
+    let delta = cmax - cmin;
+    let v = cmax;
+    let s = if cmax == 0.0 { 0.0 } else { delta / cmax };
+    let h = if delta == 0.0 {
+        0.0
+    } else if cmax == rf {
+        60.0 * (((gf - bf) / delta) % 6.0)
+    } else if cmax == gf {
+        60.0 * (((bf - rf) / delta) + 2.0)
+    } else {
+        60.0 * (((rf - gf) / delta) + 4.0)
+    };
+    let h = if h < 0.0 { h + 360.0 } else { h };
+    (h, s, v)
+}
+
+/// Does this pixel match the given color filter?
+fn pixel_matches_filter(r: u8, g: u8, b: u8, filter: &ColorFilter) -> bool {
+    let (h, s, v) = rgb_to_hsv(r, g, b);
+
+    match filter.hue_range {
+        None => {
+            // Achromatic: low saturation
+            if s > 0.25 { return false; }
+            match filter.label {
+                "White" => v > 0.75,
+                "Black" => v < 0.25,
+                _       => v >= 0.25 && v <= 0.75, // Gray
+            }
+        }
+        Some((lo, hi)) => {
+            // Must have enough saturation & brightness to be a real color
+            if s < 0.20 || v < 0.10 { return false; }
+            // Wrap-around hue range (e.g. red spans 330°–30°)
+            if lo > hi {
+                h >= lo || h <= hi
+            } else {
+                h >= lo && h <= hi
+            }
+        }
+    }
+}
+
 struct App {
     image: Option<DynamicImage>,
     img_w: u32,
@@ -39,10 +115,12 @@ struct App {
     orig_tex: Option<TextureHandle>,
     seg_tex: Option<TextureHandle>,
     edge_tex: Option<TextureHandle>,
+    color_filter_tex: Option<TextureHandle>,
     img_rect: Rect,
 
     show_seg: bool,
     show_edges: bool,
+    active_color_filters: HashSet<usize>, // indices into color_filters()
 
     mode: Mode,
     calib_len_buf: String,
@@ -58,6 +136,7 @@ struct App {
     total_area_cm2: f64,
     unit: Unit,
 
+    color_filters: Vec<ColorFilter>,
     status: String,
 }
 
@@ -70,9 +149,11 @@ impl Default for App {
             orig_tex: None,
             seg_tex: None,
             edge_tex: None,
+            color_filter_tex: None,
             img_rect: Rect::NOTHING,
             show_seg: false,
             show_edges: false,
+            active_color_filters: HashSet::new(),
             mode: Mode::Idle,
             calib_len_buf: String::new(),
             scale_px_per_cm: None,
@@ -84,6 +165,7 @@ impl Default for App {
             selected: HashSet::new(),
             total_area_cm2: 0.0,
             unit: Unit::Cm2,
+            color_filters: color_filters(),
             status: "Step 1: Load an image.".into(),
         }
     }
@@ -130,7 +212,7 @@ fn norm_to_px_dist(p1: Pos2, p2: Pos2, w: u32, h: u32) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
-fn box_blur(img: &DynamicImage, radius: u32) -> DynamicImage { // noise reduction
+fn box_blur(img: &DynamicImage, radius: u32) -> DynamicImage {
     if radius == 0 { return img.clone(); }
     let src = img.to_rgb8();
     let w   = src.width();
@@ -155,7 +237,7 @@ fn box_blur(img: &DynamicImage, radius: u32) -> DynamicImage { // noise reductio
     DynamicImage::ImageRgb8(out)
 }
 
-fn sobel_texture(img: &DynamicImage) -> ColorImage { // edge detection
+fn sobel_texture(img: &DynamicImage) -> ColorImage {
     let gray = img.to_luma8();
     let w    = gray.width()  as usize;
     let h    = gray.height() as usize;
@@ -288,6 +370,33 @@ fn build_seg_texture(
     ColorImage { size: [w as usize, h as usize], pixels }
 }
 
+/// Count pixels in the image that match a given filter, return area in cm².
+fn pixel_area_for_filter(img: &DynamicImage, filter: &ColorFilter, scale_px_per_cm: f64) -> (usize, f64) {
+    let rgb = img.to_rgb8();
+    let count = rgb.pixels()
+        .filter(|p| pixel_matches_filter(p[0], p[1], p[2], filter))
+        .count();
+    let area = count as f64 / (scale_px_per_cm * scale_px_per_cm);
+    (count, area)
+}
+
+
+/// Matched pixels keep their original color; everything else is fully black.
+fn build_color_filter_texture(img: &DynamicImage, filters: &[&ColorFilter]) -> ColorImage {
+    let rgb = img.to_rgb8();
+    let w = rgb.width() as usize;
+    let h = rgb.height() as usize;
+    let pixels = rgb.pixels().map(|p| {
+        let (r, g, b) = (p[0], p[1], p[2]);
+        if filters.iter().any(|f| pixel_matches_filter(r, g, b, f)) {
+            egui::Color32::from_rgb(r, g, b)
+        } else {
+            egui::Color32::BLACK
+        }
+    }).collect();
+    ColorImage { size: [w, h], pixels }
+}
+
 fn dyn_to_color_image(img: &DynamicImage) -> ColorImage {
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width(), rgba.height());
@@ -323,6 +432,7 @@ fn export_csv(regions: &[Region], unit: &Unit) -> String {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 
+        // ── TOP TOOLBAR ──────────────────────────────────────────────────────
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_space(5.0);
 
@@ -342,8 +452,10 @@ impl eframe::App for App {
                                 self.image           = Some(img);
                                 self.seg_tex         = None;
                                 self.edge_tex        = None;
+                                self.color_filter_tex = None;
                                 self.show_seg        = false;
                                 self.show_edges      = false;
+                                self.active_color_filters.clear();
                                 self.scale_px_per_cm = None;
                                 self.label_map.clear();
                                 self.regions.clear();
@@ -362,7 +474,6 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // Calibration states
                 match self.mode.clone() {
                     Mode::CalibP1 => {
                         ui.colored_label(egui::Color32::YELLOW, "🎯 Click FIRST endpoint on image");
@@ -480,13 +591,15 @@ impl eframe::App for App {
             // Row 2: params + selection controls
             ui.horizontal_wrapped(|ui| {
                 ui.label("Colour tol:");
-                ui.add(egui::Slider::new(&mut self.tolerance,   5..=150).clamp_to_range(true));
+                // ── BUMPED: 5..=150 → 5..=255 ──
+                ui.add(egui::Slider::new(&mut self.tolerance,   5..=255).clamp_to_range(true));
 
                 ui.label("Min px:");
                 ui.add(egui::Slider::new(&mut self.min_pixels, 50..=50_000).clamp_to_range(true));
 
                 ui.label("Blur:");
-                ui.add(egui::Slider::new(&mut self.blur_radius, 0..=5).clamp_to_range(true))
+                // ── BUMPED: 0..=5 → 0..=15 ──
+                ui.add(egui::Slider::new(&mut self.blur_radius, 0..=15).clamp_to_range(true))
                     .on_hover_text("Box blur radius applied before segmentation — reduces noise (0 = off)");
 
                 if !self.regions.is_empty() {
@@ -517,11 +630,131 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
 
+        // ── COLOR FILTER SIDE PANEL (top-right) ──────────────────────────────
+        egui::SidePanel::right("color_filter_panel")
+            .resizable(false)
+            .min_width(130.0)
+            .max_width(130.0)
+            .show(ctx, |ui| {
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("🎨 Color Filter").strong());
+                ui.separator();
+
+                let has_image = self.image.is_some();
+
+                for (i, filter) in self.color_filters.clone().iter().enumerate() {
+                    let is_active = self.active_color_filters.contains(&i);
+
+                    let btn_text = egui::RichText::new(filter.label)
+                        .strong()
+                        .color(if is_active { egui::Color32::BLACK } else { egui::Color32::WHITE });
+
+                    let bg_color = filter.swatch;
+                    let frame_color = if is_active {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::from_black_alpha(0)
+                    };
+
+                    let btn = egui::Button::new(btn_text)
+                        .fill(bg_color)
+                        .stroke(egui::Stroke::new(if is_active { 2.5 } else { 0.0 }, frame_color))
+                        .min_size(Vec2::new(115.0, 22.0));
+
+                    let resp = ui.add_enabled(has_image, btn);
+
+                    if resp.clicked() {
+                        if is_active {
+                            self.active_color_filters.remove(&i);
+                        } else {
+                            self.active_color_filters.insert(i);
+                        }
+                        // Rebuild texture from all currently active filters
+                        if self.active_color_filters.is_empty() {
+                            self.color_filter_tex = None;
+                        } else if let Some(img) = &self.image {
+                            let active_refs: Vec<&ColorFilter> = self.active_color_filters
+                                .iter()
+                                .map(|&idx| &self.color_filters[idx])
+                                .collect();
+                            let ci = build_color_filter_texture(img, &active_refs);
+                            self.color_filter_tex = Some(
+                                ctx.load_texture("cf", ci, TextureOptions::default())
+                            );
+                        }
+                    }
+
+                    ui.add_space(2.0);
+                }
+
+                ui.separator();
+                if !self.active_color_filters.is_empty() {
+                    if ui.button("✖  Clear filters").clicked() {
+                        self.active_color_filters.clear();
+                        self.color_filter_tex = None;
+                    }
+                } else {
+                    ui.label(egui::RichText::new("No filter active").italics().small()
+                        .color(egui::Color32::GRAY));
+                }
+            });
+
+        // ── BOTTOM RESULTS PANEL ──────────────────────────────────────────────
         egui::TopBottomPanel::bottom("results").min_height(185.0).show(ctx, |ui| {
             ui.add_space(5.0);
             ui.label(egui::RichText::new(&self.status).italics().small());
 
-            if !self.regions.is_empty() {
+            let filter_active = !self.active_color_filters.is_empty();
+
+            if filter_active {
+                // ── FILTER MODE: one clean row per selected color ──
+                ui.separator();
+
+                if let Some(img) = &self.image {
+                    if let Some(scale) = self.scale_px_per_cm {
+                        let factor   = self.unit.factor();
+                        let unit_lbl = self.unit.label();
+
+                        // Collect results for each active filter, sorted by filter index so order is stable
+                        let mut filter_indices: Vec<usize> = self.active_color_filters.iter().copied().collect();
+                        filter_indices.sort();
+
+                        egui::Grid::new("filter_area_table")
+                            .num_columns(3)
+                            .striped(false)
+                            .spacing([20.0, 6.0])
+                            .show(ui, |ui| {
+                                ui.strong("Color");
+                                ui.strong(format!("Area ({})", unit_lbl));
+                                ui.strong("Pixels");
+                                ui.end_row();
+
+                                for fi in &filter_indices {
+                                    let f = &self.color_filters[*fi];
+                                    let (px_count, area_cm2) = pixel_area_for_filter(img, f, scale);
+
+                                    // Color swatch + label
+                                    ui.horizontal(|ui| {
+                                        let (sw, _) = ui.allocate_exact_size(Vec2::new(18.0, 18.0), egui::Sense::hover());
+                                        ui.painter().rect_filled(sw, 3.0, f.swatch);
+                                        ui.label(egui::RichText::new(f.label).strong().size(15.0));
+                                    });
+
+                                    ui.label(egui::RichText::new(
+                                        format!("{:.4}", area_cm2 * factor)
+                                    ).size(15.0).strong());
+
+                                    ui.label(egui::RichText::new(
+                                        px_count.to_string()
+                                    ).size(13.0).color(egui::Color32::GRAY));
+
+                                    ui.end_row();
+                                }
+                            });
+                    }
+                }
+            } else if !self.regions.is_empty() {
+                // ── NORMAL MODE: full region table ──
                 let factor   = self.unit.factor();
                 let unit_lbl = self.unit.label();
 
@@ -600,6 +833,7 @@ impl eframe::App for App {
             }
         });
 
+        // ── CENTRAL IMAGE PANEL ───────────────────────────────────────────────
         egui::CentralPanel::default().show(ctx, |ui| {
             let tex_ref = if self.show_seg {
                 self.seg_tex.as_ref().or(self.orig_tex.as_ref())
@@ -638,11 +872,23 @@ impl eframe::App for App {
                 _ => {}
             }
 
-            ui.painter().image(
-                tex.id(), img_rect,
-                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
+            // When color filters are active, show ONLY the filter texture (matched pixels in
+            // original color, everything else black). Otherwise show the normal base image.
+            if !self.active_color_filters.is_empty() {
+                if let Some(cf_tex) = &self.color_filter_tex {
+                    ui.painter().image(
+                        cf_tex.id(), img_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+            } else {
+                ui.painter().image(
+                    tex.id(), img_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
 
             if self.show_edges {
                 if let Some(et) = &self.edge_tex {
@@ -738,10 +984,10 @@ impl eframe::App for App {
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(
-        "Area Measurement Tool",
+        "Image Segmenter",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_title("Area Measurement Tool — Irregular Shape Analyser")
+                .with_title("Image Segmenter")
                 .with_inner_size([1250.0, 860.0]),
             ..Default::default()
         },
