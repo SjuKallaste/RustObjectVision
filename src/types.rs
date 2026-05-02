@@ -27,9 +27,9 @@ impl Unit {
 
 #[derive(Clone)]
 pub struct Region {
-    pub index:       usize, // 1-based display index
+    pub index: usize,
     pub pixel_count: usize,
-    pub area_cm2:    f64,
-    pub avg_color:   [u8; 3],
-    pub centroid:    (f32, f32),
+    pub area_cm2: f64,
+    pub avg_color: [u8; 3],
+    pub centroid: (f32, f32),
 }

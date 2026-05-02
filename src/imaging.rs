@@ -38,9 +38,9 @@ pub fn sobel_texture(img: &DynamicImage) -> ColorImage {
     for y in 1..(h - 1) {
         for x in 1..(w - 1) {
             let gx = -get(x-1,y-1) - 2.0*get(x-1,y) - get(x-1,y+1)
-                      +get(x+1,y-1) + 2.0*get(x+1,y) + get(x+1,y+1);
+                +get(x+1,y-1) + 2.0*get(x+1,y) + get(x+1,y+1);
             let gy = -get(x-1,y-1) - 2.0*get(x,y-1) - get(x+1,y-1)
-                      +get(x-1,y+1) + 2.0*get(x,y+1) + get(x+1,y+1);
+                +get(x-1,y+1) + 2.0*get(x,y+1) + get(x+1,y+1);
             let mag = (gx * gx + gy * gy).sqrt().min(255.0) as u8;
             pixels[y * w + x] = egui::Color32::from_rgba_unmultiplied(255, 100, 0, mag);
         }

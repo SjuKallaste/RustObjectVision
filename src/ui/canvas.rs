@@ -41,11 +41,10 @@ pub fn show(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
 
     match &app.mode {
         Mode::CalibP1 | Mode::CalibP2 { .. } => ctx.set_cursor_icon(egui::CursorIcon::Crosshair),
-        Mode::Segmented                       => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
-        _                                     => {}
+        Mode::Segmented => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
+        _ => {}
     }
 
-    // ── Draw base image or color-filter mask ──────────────────────────────────
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     if !app.active_color_filters.is_empty() {
         if let Some(cf_tex) = &app.color_filter_tex {

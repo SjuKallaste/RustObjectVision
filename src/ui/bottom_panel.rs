@@ -5,7 +5,6 @@ use crate::color::pixel_area_for_filter;
 
 pub fn show(app: &App, ui: &mut egui::Ui) {
     ui.add_space(5.0);
-    ui.label(egui::RichText::new(&app.status).italics().small());
 
     if !app.active_color_filters.is_empty() {
         show_filter_mode(app, ui);
@@ -23,7 +22,6 @@ fn show_filter_mode(app: &App, ui: &mut egui::Ui) {
 
     ui.separator();
 
-    // Stable ordering: sort filter indices
     let mut filter_indices: Vec<usize> = app.active_color_filters.iter().copied().collect();
     filter_indices.sort();
 
@@ -76,8 +74,8 @@ fn show_normal_mode(app: &App, ui: &mut egui::Ui) {
                 "Total area: {:.4} {}   |   {} region(s)",
                 app.total_area_cm2 * factor, unit_lbl, app.regions.len()
             ))
-            .strong()
-            .size(14.0),
+                .strong()
+                .size(14.0),
         );
         if let Some(sa) = sel_area {
             ui.separator();
@@ -86,9 +84,9 @@ fn show_normal_mode(app: &App, ui: &mut egui::Ui) {
                     "Selected: {:.4} {}  ({} region(s))",
                     sa * factor, unit_lbl, app.selected.len()
                 ))
-                .strong()
-                .size(14.0)
-                .color(egui::Color32::from_rgb(255, 210, 60)),
+                    .strong()
+                    .size(14.0)
+                    .color(egui::Color32::from_rgb(255, 210, 60)),
             );
         }
     });

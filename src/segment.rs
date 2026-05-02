@@ -10,24 +10,23 @@ pub fn color_dist(a: [u8; 3], b: [u8; 3]) -> u32 {
 }
 
 pub fn segment(
-    img:    &DynamicImage,
-    tol:    u32,
+    img: &DynamicImage,
+    tol: u32,
     min_px: usize,
-    scale:  f64,
+    scale: f64,
 ) -> (Vec<i32>, Vec<Region>) {
     let rgb = img.to_rgb8();
-    let w   = rgb.width()  as usize;
-    let h   = rgb.height() as usize;
+    let w = rgb.width()  as usize;
+    let h = rgb.height() as usize;
 
     let pixels: Vec<[u8; 3]> = rgb.pixels().map(|p| [p[0], p[1], p[2]]).collect();
-    let mut labels   = vec![-1i32; w * h];
+    let mut labels = vec![-1i32; w * h];
     let mut next_lbl = 0usize;
 
-    // Per-label accumulators
-    let mut counts:    Vec<usize>    = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
     let mut color_sum: Vec<[u64; 3]> = Vec::new();
-    let mut cx_sum:    Vec<u64>      = Vec::new();
-    let mut cy_sum:    Vec<u64>      = Vec::new();
+    let mut cx_sum: Vec<u64> = Vec::new();
+    let mut cy_sum: Vec<u64> = Vec::new();
 
     for start in 0..(w * h) {
         if labels[start] != -1 { continue; }
@@ -44,13 +43,13 @@ pub fn segment(
             let px = idx % w;
             let py = idx / w;
             let li = lbl as usize;
-            counts[li]       += 1;
+            counts[li] += 1;
             let c = pixels[idx];
             color_sum[li][0] += c[0] as u64;
             color_sum[li][1] += c[1] as u64;
             color_sum[li][2] += c[2] as u64;
-            cx_sum[li]       += px as u64;
-            cy_sum[li]       += py as u64;
+            cx_sum[li] += px as u64;
+            cy_sum[li] += py as u64;
 
             for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                 let nx = px as i32 + dx;
