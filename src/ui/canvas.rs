@@ -26,10 +26,11 @@ pub fn show(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
         Some(t) => t,
     };
 
-    let avail    = ui.available_size();
+    // Fit image into available space
+    let avail = ui.available_size();
     let tex_size = tex.size_vec2();
-    let fit      = (avail.x / tex_size.x).min(avail.y / tex_size.y);
-    let disp     = tex_size * fit;
+    let fit = (avail.x / tex_size.x).min(avail.y / tex_size.y);
+    let disp = tex_size * fit;
     let img_rect = Rect::from_center_size(ui.max_rect().center(), disp);
     app.img_rect = img_rect;
 
@@ -46,7 +47,7 @@ pub fn show(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
     }
 
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    if !app.active_color_filters.is_empty() {
+    if !app.active_color_filters.is_empty() || app.imagej_mode {
         if let Some(cf_tex) = &app.color_filter_tex {
             ui.painter().image(cf_tex.id(), img_rect, uv, egui::Color32::WHITE);
         }
@@ -76,7 +77,7 @@ pub fn show(app: &mut App, ctx: &egui::Context, ui: &mut egui::Ui) {
             let cy  = img_rect.min.y + r.centroid.1 * disp.y;
             let lbl = r.index.to_string();
             painter.text(egui::pos2(cx+1.0, cy+1.0), egui::Align2::CENTER_CENTER, &lbl, font.clone(), egui::Color32::BLACK);
-            painter.text(egui::pos2(cx,     cy    ), egui::Align2::CENTER_CENTER, &lbl, font.clone(), egui::Color32::WHITE);
+            painter.text(egui::pos2(cx, cy), egui::Align2::CENTER_CENTER, &lbl, font.clone(), egui::Color32::WHITE);
         }
     }
 }

@@ -1,16 +1,49 @@
 use egui::{ScrollArea, Vec2};
 
 use crate::app::App;
-use crate::color::pixel_area_for_filter;
+use crate::color::{pixel_area_for_filter, pixel_area_imagej};
 
 pub fn show(app: &App, ui: &mut egui::Ui) {
     ui.add_space(5.0);
 
-    if !app.active_color_filters.is_empty() {
+    if app.imagej_mode {
+        show_imagej_mode(app, ui);
+    } else if !app.active_color_filters.is_empty() {
         show_filter_mode(app, ui);
     } else if !app.regions.is_empty() {
         show_normal_mode(app, ui);
     }
+}
+
+fn show_imagej_mode(app: &App, ui: &mut egui::Ui) {
+    let Some(img) = &app.image else { return };
+    let Some(scale) = app.scale_px_per_cm else { return };
+
+    let (px_count, area_cm2) = pixel_area_imagej(
+        img,
+        app.imagej_hue_min, app.imagej_hue_max,
+        app.imagej_sat_min, app.imagej_sat_max,
+        app.imagej_bri_min, app.imagej_bri_max,
+        scale,
+    );
+
+    let factor   = app.unit.factor();
+    let unit_lbl = app.unit.label();
+
+    ui.separator();
+    egui::Grid::new("imagej_area_table")
+        .num_columns(3)
+        .spacing([20.0, 6.0])
+        .show(ui, |ui| {
+            ui.strong("Mode");
+            ui.strong(format!("Area ({})", unit_lbl));
+            ui.strong("Pixels");
+            ui.end_row();
+            ui.label(egui::RichText::new("HSB").strong().size(15.0));
+            ui.label(egui::RichText::new(format!("{:.4}", area_cm2 * factor)).strong().size(15.0));
+            ui.label(egui::RichText::new(px_count.to_string()).size(13.0).color(egui::Color32::GRAY));
+            ui.end_row();
+        });
 }
 
 fn show_filter_mode(app: &App, ui: &mut egui::Ui) {
@@ -22,6 +55,7 @@ fn show_filter_mode(app: &App, ui: &mut egui::Ui) {
 
     ui.separator();
 
+    // Stable ordering: sort filter indices
     let mut filter_indices: Vec<usize> = app.active_color_filters.iter().copied().collect();
     filter_indices.sort();
 

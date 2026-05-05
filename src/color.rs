@@ -1,55 +1,57 @@
 use egui::ColorImage;
 use image::DynamicImage;
 
-// ── Color filter definition ───────────────────────────────────────────────────
-
-/// Named color filter. Chromatic colors use a hue range; achromatic ones
-/// (White / Gray / Black) set `hue_range` to `None` and are matched by
-/// saturation + value thresholds instead.
 #[derive(Clone, PartialEq)]
 pub struct ColorFilter {
-    pub label:     &'static str,
-    pub swatch:    egui::Color32,
-    /// Hue range in degrees [0, 360). `None` means achromatic.
-    pub hue_range: Option<(f32, f32)>,
+    pub label: &'static str,
+    pub swatch: egui::Color32,
+    pub hue: Option<(u8, u8)>,
+    pub sat: (u8, u8),
+    pub bri: (u8, u8),
 }
 
 pub fn all_color_filters() -> Vec<ColorFilter> {
     vec![
-        ColorFilter { label: "Red", swatch: egui::Color32::from_rgb(220,  50,  50), hue_range: Some((330.0, 30.0)) },
-        ColorFilter { label: "Orange", swatch: egui::Color32::from_rgb(230, 130,  30), hue_range: Some(( 15.0, 45.0)) },
-        ColorFilter { label: "Yellow", swatch: egui::Color32::from_rgb(230, 210,  30), hue_range: Some(( 40.0, 75.0)) },
-        ColorFilter { label: "Green", swatch: egui::Color32::from_rgb( 40, 190,  60), hue_range: Some(( 70.0, 165.0)) },
-        ColorFilter { label: "Cyan", swatch: egui::Color32::from_rgb( 30, 200, 210), hue_range: Some((160.0, 200.0)) },
-        ColorFilter { label: "Blue", swatch: egui::Color32::from_rgb( 50,  90, 220), hue_range: Some((195.0, 265.0)) },
-        ColorFilter { label: "Purple", swatch: egui::Color32::from_rgb(140,  50, 210), hue_range: Some((260.0, 310.0)) },
-        ColorFilter { label: "Pink", swatch: egui::Color32::from_rgb(220,  80, 160), hue_range: Some((305.0, 340.0)) },
-        ColorFilter { label: "White", swatch: egui::Color32::from_rgb(240, 240, 240), hue_range: None },
-        ColorFilter { label: "Gray", swatch: egui::Color32::from_rgb(140, 140, 140), hue_range: None },
-        ColorFilter { label: "Black", swatch: egui::Color32::from_rgb( 30,  30,  30), hue_range: None },
+        // Hue: Red≈0, Yellow≈43, Green≈85, Cyan≈128, Blue≈171, Magenta≈213
+        ColorFilter { label: "Red", swatch: egui::Color32::from_rgb(220, 50, 50), hue: Some((0, 15)), sat: (100, 255), bri: (50, 255) },
+        ColorFilter { label: "Orange", swatch: egui::Color32::from_rgb(230, 130, 30), hue: Some((11, 30)), sat: (100, 255), bri: (50, 255) },
+        ColorFilter { label: "Yellow", swatch: egui::Color32::from_rgb(230, 210, 30), hue: Some((28, 52)), sat: (100, 255), bri: (50, 255) },
+        ColorFilter { label: "Green", swatch: egui::Color32::from_rgb( 40, 190, 60), hue: Some((49,115)), sat: (50, 255), bri: (30, 255) },
+        ColorFilter { label: "Cyan", swatch: egui::Color32::from_rgb( 30, 200, 210), hue: Some((113,142)), sat: (50, 255), bri: (30, 255) },
+        ColorFilter { label: "Blue", swatch: egui::Color32::from_rgb( 50, 90, 220), hue: Some((138,185)), sat: (50, 255), bri: (30, 255) },
+        ColorFilter { label: "Purple", swatch: egui::Color32::from_rgb(140, 50, 210), hue: Some((183,213)), sat: (50, 255), bri: (30, 255) },
+        ColorFilter { label: "Pink", swatch: egui::Color32::from_rgb(220, 80, 160), hue: Some((213,245)), sat: (50, 255), bri: (50, 255) },
+        ColorFilter { label: "White", swatch: egui::Color32::from_rgb(240, 240, 240), hue: None, sat: (0, 50), bri: (200, 255) },
+        ColorFilter { label: "Gray", swatch: egui::Color32::from_rgb(140, 140, 140), hue: None, sat: (0, 50), bri: (80, 200) },
+        ColorFilter { label: "Black", swatch: egui::Color32::from_rgb( 30, 30,  30), hue: None, sat: (0, 255), bri: (0, 50) },
     ]
 }
 
-pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+pub fn rgb_to_hsb(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     let rf = r as f32 / 255.0;
     let gf = g as f32 / 255.0;
     let bf = b as f32 / 255.0;
     let cmax  = rf.max(gf).max(bf);
     let cmin  = rf.min(gf).min(bf);
     let delta = cmax - cmin;
-    let v = cmax;
-    let s = if cmax == 0.0 { 0.0 } else { delta / cmax };
-    let h = if delta == 0.0 {
+
+    let brightness = cmax;
+    let saturation = if cmax == 0.0 { 0.0 } else { delta / cmax };
+    let hue_norm = if delta == 0.0 {
         0.0
     } else if cmax == rf {
-        60.0 * (((gf - bf) / delta) % 6.0)
+        (((gf - bf) / delta) % 6.0) / 6.0
     } else if cmax == gf {
-        60.0 * (((bf - rf) / delta) + 2.0)
+        (((bf - rf) / delta) + 2.0) / 6.0
     } else {
-        60.0 * (((rf - gf) / delta) + 4.0)
+        (((rf - gf) / delta) + 4.0) / 6.0
     };
-    let h = if h < 0.0 { h + 360.0 } else { h };
-    (h, s, v)
+    let hue_norm = if hue_norm < 0.0 { hue_norm + 1.0 } else { hue_norm };
+    (
+        (hue_norm   * 255.0).round() as u8,
+        (saturation * 255.0).round() as u8,
+        (brightness * 255.0).round() as u8,
+    )
 }
 
 pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
@@ -68,21 +70,27 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
 }
 
 pub fn pixel_matches_filter(r: u8, g: u8, b: u8, filter: &ColorFilter) -> bool {
-    let (h, s, v) = rgb_to_hsv(r, g, b);
-    match filter.hue_range {
-        None => {
-            if s > 0.25 { return false; }
-            match filter.label {
-                "White" => v > 0.75,
-                "Black" => v < 0.25,
-                _       => v >= 0.25 && v <= 0.75, // Gray
+    let (h, s, bri) = rgb_to_hsb(r, g, b);
+
+    if s   < filter.sat.0 || s   > filter.sat.1 { return false; }
+    if bri < filter.bri.0 || bri > filter.bri.1 { return false; }
+
+    match filter.hue {
+        None => true,
+        Some((lo, hi)) => {
+            if lo <= hi {
+                h >= lo && h <= hi
+            } else {
+                h >= lo || h <= hi
             }
         }
-        Some((lo, hi)) => {
-            if s < 0.20 || v < 0.10 { return false; }
-            if lo > hi { h >= lo || h <= hi } else { h >= lo && h <= hi }
-        }
     }
+}
+
+#[allow(dead_code)]
+pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (h, s, v) = rgb_to_hsb(r, g, b);
+    (h as f32 / 255.0 * 360.0, s as f32 / 255.0, v as f32 / 255.0)
 }
 
 pub fn build_color_filter_texture(img: &DynamicImage, filters: &[&ColorFilter]) -> ColorImage {
@@ -100,13 +108,54 @@ pub fn build_color_filter_texture(img: &DynamicImage, filters: &[&ColorFilter]) 
     ColorImage { size: [w, h], pixels }
 }
 
+pub fn pixel_matches_imagej(r: u8, g: u8, b: u8, h_min: u8, h_max: u8, s_min: u8, s_max: u8, bri_min: u8, bri_max: u8) -> bool {
+    let (h, s, bri) = rgb_to_hsb(r, g, b);
+    if s   < s_min   || s   > s_max   { return false; }
+    if bri < bri_min || bri > bri_max { return false; }
+    if h_min <= h_max { h >= h_min && h <= h_max } else { h >= h_min || h <= h_max }
+}
+
+pub fn build_imagej_filter_texture(
+    img: &DynamicImage,
+    h_min: u8, h_max: u8,
+    s_min: u8, s_max: u8,
+    bri_min: u8, bri_max: u8,
+) -> ColorImage {
+    let rgb = img.to_rgb8();
+    let w   = rgb.width()  as usize;
+    let h   = rgb.height() as usize;
+    let pixels = rgb.pixels().map(|p| {
+        let (r, g, b) = (p[0], p[1], p[2]);
+        if pixel_matches_imagej(r, g, b, h_min, h_max, s_min, s_max, bri_min, bri_max) {
+            egui::Color32::from_rgb(r, g, b)
+        } else {
+            egui::Color32::BLACK
+        }
+    }).collect();
+    ColorImage { size: [w, h], pixels }
+}
+
+pub fn pixel_area_imagej(
+    img: &DynamicImage,
+    h_min: u8, h_max: u8,
+    s_min: u8, s_max: u8,
+    bri_min: u8, bri_max: u8,
+    scale_px_per_cm: f64,
+) -> (usize, f64) {
+    let rgb   = img.to_rgb8();
+    let count = rgb.pixels()
+        .filter(|p| pixel_matches_imagej(p[0], p[1], p[2], h_min, h_max, s_min, s_max, bri_min, bri_max))
+        .count();
+    (count, count as f64 / (scale_px_per_cm * scale_px_per_cm))
+}
+
 pub fn compute_prominent_filters(
     img:       &DynamicImage,
     filters:   &[ColorFilter],
     threshold: f64,
 ) -> Vec<usize> {
-    let rgb = img.to_rgb8();
-    let total = (rgb.width() * rgb.height()) as f64;
+    let rgb        = img.to_rgb8();
+    let total      = (rgb.width() * rgb.height()) as f64;
     let mut counts = vec![0usize; filters.len()];
 
     for p in rgb.pixels() {
@@ -134,7 +183,7 @@ pub fn pixel_area_for_filter(
     filter: &ColorFilter,
     scale_px_per_cm: f64,
 ) -> (usize, f64) {
-    let rgb = img.to_rgb8();
+    let rgb   = img.to_rgb8();
     let count = rgb.pixels()
         .filter(|p| pixel_matches_filter(p[0], p[1], p[2], filter))
         .count();
